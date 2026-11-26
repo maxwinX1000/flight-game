@@ -3,7 +3,7 @@
 // landing on the runway. The flight model stays dumb; this file decides
 // what counts as progress, what costs fuel, and what ends the flight.
 
-import { CONFIG, MISSIONS, RING_COURSE, TOUR_BEACONS, RUNWAY } from './config.js';
+import { CONFIG, MISSIONS, RING_COURSE, TOUR_BEACONS, RUNWAY, ringRadius } from './config.js';
 
 export class Missions {
   constructor(world, plane, audio, onEvent) {
@@ -24,6 +24,9 @@ export class Missions {
     this.airborne = false; // true once the plane has actually flown
     this.warnedFuel = false;
     this.warnedStall = false;
+    this.combo = 1; // score multiplier: x1, x2, x3 for consecutive clean hits
+    this.downed = 0; // seconds left grounded after a crash, before respawn
+    this.lastLowPassWarn = -10;
   }
 
   start(missionId) {
@@ -40,6 +43,9 @@ export class Missions {
     this.airborne = false;
     this.warnedFuel = false;
     this.warnedStall = false;
+    this.combo = 1;
+    this.downed = 0;
+    this.lastLowPassWarn = -10;
     this.plane.reset();
     this.world.setNextRing(0);
     this.onEvent('start', { mission: this.mission });
@@ -53,6 +59,16 @@ export class Missions {
 
   update(dt) {
     if (this.state !== 'flying') return;
+    // Downed after a crash: she sits where she fell while the clock runs,
+    // then respawns on the runway. No fuel burn, no checks while down.
+    if (this.downed > 0) {
+      this.downed -= dt;
+      if (this.downed <= 0) {
+        this.downed = 0;
+        this.respawn();
+      }
+      return;
+    }
     this.time += dt;
     const p = this.plane;
     if (p.altitude > 15) this.airborne = true;
@@ -81,16 +97,34 @@ export class Missions {
     this.checkCrash(dt);
   }
 
+  // A clean hit raises the combo; the next hit pays base x combo.
+  award(base) {
+    const gained = base * this.combo;
+    this.score += gained;
+    this.combo = Math.min(3, this.combo + 1);
+    return gained;
+  }
+
   checkRings() {
     if (!this.mission || this.mission.id !== 'rings') return;
     if (this.ringIndex >= RING_COURSE.length) return;
     const target = RING_COURSE[this.ringIndex];
     const d = this.plane.position.distanceTo(new THREE.Vector3(target[0], target[1], target[2]));
-    if (d < 16) {
-      this.score += CONFIG.scoreRing;
+    // The pass window follows the ring's size: wide rings forgive, the
+    // small back-half rings do not. The window is 3 m past the ring's
+    // visible edge (tube 1.6) — a fair arcade hitbox for a 9.2 m wide
+    // plane, and the dead-centre bonus still rewards threading the middle.
+    if (d < ringRadius(this.ringIndex) + 3) {
+      const gained = this.award(CONFIG.scoreRing);
+      let extra = '';
+      if (d < CONFIG.deadCentreRadius) {
+        this.score += CONFIG.scoreDeadCentre;
+        extra = `  ·  DEAD CENTRE +${CONFIG.scoreDeadCentre}`;
+      }
       this.fuel = Math.min(CONFIG.fuelMax, this.fuel + CONFIG.fuelRingBonus);
       this.audio.ring();
-      this.onEvent('ring', { index: this.ringIndex, total: RING_COURSE.length, score: this.score });
+      this.world.burst(new THREE.Vector3(target[0], target[1], target[2]));
+      this.onEvent('ring', { index: this.ringIndex, total: RING_COURSE.length, score: this.score, gained, extra });
       this.ringIndex += 1;
       this.world.setNextRing(this.ringIndex);
       if (this.ringIndex >= RING_COURSE.length) this.finish('All rings flown — beautiful flying.');
@@ -103,11 +137,20 @@ export class Missions {
       if (this.beaconsHit.has(i)) return;
       const d = this.plane.position.distanceTo(new THREE.Vector3(b[0], b[1], b[2]));
       if (d < 22) {
+        // A tour beacon only counts as a low pass: under 100 m, close to
+        // the water, not a flyover at cruise altitude.
+        if (this.plane.altitude >= CONFIG.tourLowPassMaxAlt) {
+          if (this.time - this.lastLowPassWarn > 3) {
+            this.lastLowPassWarn = this.time;
+            this.onEvent('warning', { text: 'LOW PASS — get under 100 m to count it' });
+          }
+          return;
+        }
         this.beaconsHit.add(i);
-        this.score += CONFIG.scoreCheckpoint;
+        const gained = this.award(CONFIG.scoreCheckpoint);
         this.fuel = Math.min(CONFIG.fuelMax, this.fuel + CONFIG.fuelRingBonus);
         this.audio.checkpoint();
-        this.onEvent('beacon', { index: i, total: TOUR_BEACONS.length, score: this.score });
+        this.onEvent('beacon', { index: i, total: TOUR_BEACONS.length, score: this.score, gained, extra: '  ·  LOW PASS' });
         if (this.beaconsHit.size >= TOUR_BEACONS.length) {
           this.finish('Every beacon visited — the islands are yours.');
         }
@@ -142,12 +185,17 @@ export class Missions {
     const p = this.plane;
     const ground = this.world.groundHeight(p.position.x, p.position.z);
     const overWater = ground <= 0;
+    // The surface she can touch: the waterline (y=0) over water, the
+    // terrain over land. The old code used ground+1.0 for both, but the
+    // seabed sits at -2, so over water the touch test (y <= -1) could
+    // never fire — a water ditch was impossible.
+    const surfaceY = overWater ? 0 : ground;
     // Touching terrain or water: fast is a crash, slow is a hard landing.
     // A seaplane ditches in water at any real speed, so water is strict.
     // On the runway strip a fast touchdown is a hard landing, not a crash.
     const [scx, scz] = RUNWAY.centre;
     const onStrip = Math.abs(p.position.x - scx) < RUNWAY.width / 2 && Math.abs(p.position.z - scz) < RUNWAY.length / 2;
-    if (p.position.y <= ground + 1.0) {
+    if (p.position.y <= surfaceY + 1.0) {
       if (overWater) {
         if (p.speed > 20) {
           this.hit('water');
@@ -159,7 +207,7 @@ export class Missions {
       }
       // Slow touchdown on land: she rolls, and stays down.
       p.onGround = true;
-      p.position.y = ground + 1.0;
+      p.position.y = surfaceY + 1.0;
       p.speed *= Math.max(0, 1 - 2.2 * dt);
       if (this.mission && this.mission.id === 'landing' && this.tookOff) {
         // A slow touchdown off the strip still counts as down, just ugly.
@@ -189,16 +237,42 @@ export class Missions {
 
   hit(what) {
     this.damage += 1;
+    this.combo = 1; // a hit breaks the combo
     this.audio.crash();
     this.onEvent('damage', { damage: this.damage, max: CONFIG.damageMax, what });
     if (this.damage >= CONFIG.damageMax) {
       this.crash(`Crashed into ${what}. The flight is over.`);
       return;
     }
-    // One hard hit: bounce her back into the air, slower and shaken.
-    this.plane.position.y = Math.max(this.plane.position.y, this.world.groundHeight(this.plane.position.x, this.plane.position.z) + 12);
-    this.plane.speed *= 0.55;
-    this.plane.pitch = 8;
+    // No bounce back into the air: she goes down where she hit. On water
+    // she ditches with a splash; on land she stops in a puff of smoke.
+    // Speed zero, then a respawn on the runway after ~1.5 s.
+    const p = this.plane;
+    const ground = this.world.groundHeight(p.position.x, p.position.z);
+    const overWater = ground <= 0;
+    if (overWater) {
+      this.world.splash(p.position);
+      p.position.y = 0.6;
+    } else {
+      this.world.smoke(p.position);
+      p.position.y = ground + 1.0;
+    }
+    p.speed = 0;
+    p.throttle = 0;
+    p.pitch = 0;
+    p.bank = 0;
+    p.onGround = true;
+    p.downed = true;
+    this.downed = 1.5;
+  }
+
+  // Back on the runway threshold, engine idling, progress kept: the rings
+  // already flown stay flown, the beacons already visited stay visited.
+  respawn() {
+    this.plane.reset();
+    this.airborne = false;
+    this.tookOff = false;
+    this.onEvent('warning', { text: 'Back on the runway — throttle up and go again' });
   }
 
   finish(message) {

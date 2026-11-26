@@ -2,7 +2,7 @@
 // Everything visible is built here from primitives and a seeded heightmap,
 // so the islands look the same on every load and every machine.
 
-import { CONFIG, RING_COURSE, TOUR_BEACONS, RUNWAY } from './config.js';
+import { CONFIG, RING_COURSE, TOUR_BEACONS, RUNWAY, ringRadius } from './config.js';
 
 // Small deterministic random: same seed, same islands, every run.
 export function mulberry32(seed) {
@@ -46,6 +46,7 @@ export class World {
     this.scene = scene;
     this.rings = [];
     this.beacons = [];
+    this.effects = []; // burst / splash / smoke particles, aged out in update()
     this.runwayTop = 2.5;
     this.buildSky();
     this.buildOcean();
@@ -57,14 +58,45 @@ export class World {
   }
 
   buildSky() {
-    const sky = new THREE.Color(0x87bfe8);
-    this.scene.background = sky;
+    // Gradient sky: a big inverted sphere whose vertices fade from deep
+    // blue overhead to pale horizon haze, instead of a flat solid colour.
+    const skyGeo = new THREE.SphereGeometry(2800, 24, 16);
+    const top = new THREE.Color(0x2f6fc4);
+    const mid = new THREE.Color(0x7fb8e8);
+    const horizon = new THREE.Color(0xd8eefb);
+    const pos = skyGeo.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i) / 2800; // -1 (below) .. +1 (zenith)
+      const c = y > 0.25
+        ? top.clone().lerp(mid, 1 - (y - 0.25) / 0.75)
+        : mid.clone().lerp(horizon, 1 - (y + 0.08) / 0.33);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    skyGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
+    this.scene.add(sky);
+    this.scene.background = null;
     this.scene.fog = new THREE.Fog(0x9fc8e8, 500, 2200);
     const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x3d7a4a, 0.9);
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff2d0, 1.4);
     sun.position.set(400, 600, 200);
+    // Shadows: the sun casts them, over the home island and runway where
+    // the plane spends most of its time, so the ground reads as solid.
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -550;
+    sun.shadow.camera.right = 550;
+    sun.shadow.camera.top = 550;
+    sun.shadow.camera.bottom = -550;
+    sun.shadow.camera.near = 100;
+    sun.shadow.camera.far = 2000;
+    sun.shadow.bias = -0.0006;
     this.scene.add(sun);
+    this.sun = sun;
     // Sun disc and a few soft clouds.
     const sunMesh = new THREE.Mesh(
       new THREE.CircleGeometry(60, 24),
@@ -93,12 +125,40 @@ export class World {
   }
 
   buildOcean() {
-    const geo = new THREE.PlaneGeometry(5200, 5200, 1, 1);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x1e6f9e });
+    // Segmented sea with a per-vertex blue jitter, so the water reads as
+    // moving surface instead of one flat sheet of paint.
+    const seg = 32;
+    const geo = new THREE.PlaneGeometry(5200, 5200, seg, seg);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    const base = new THREE.Color(0x1e6f9e);
+    const deep = new THREE.Color(0x155a86);
+    const light = new THREE.Color(0x2f8ab8);
+    const rand = mulberry32(5);
+    for (let i = 0; i < pos.count; i++) {
+      const t = rand();
+      const c = t < 0.5 ? base.clone().lerp(deep, t * 1.4) : base.clone().lerp(light, (t - 0.5) * 1.2);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const sea = new THREE.Mesh(geo, mat);
-    sea.rotation.x = -Math.PI / 2;
     sea.position.y = CONFIG.seaLevel;
+    sea.receiveShadow = true;
     this.scene.add(sea);
+    // A second, slow-drifting swell layer: a translucent sheet a touch
+    // above the sea that slides with the wind, so the ocean never sits still.
+    const swell = new THREE.Mesh(
+      new THREE.PlaneGeometry(5200, 5200, 8, 8),
+      new THREE.MeshLambertMaterial({ color: 0x7fc4e0, transparent: true, opacity: 0.16 }),
+    );
+    swell.rotation.x = -Math.PI / 2;
+    swell.position.y = 0.5;
+    this.scene.add(swell);
+    this.swell = swell;
     // A lighter shallow ring around the main island reads as a lagoon.
     const lagoon = new THREE.Mesh(
       new THREE.CircleGeometry(330, 40),
@@ -145,6 +205,7 @@ export class World {
       geo.computeVertexNormals();
       const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
       mesh.position.set(isl.cx, 0, isl.cz);
+      mesh.receiveShadow = true;
       this.scene.add(mesh);
     }
   }
@@ -232,7 +293,9 @@ export class World {
     const mat = new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.9 });
     const matNext = new THREE.MeshBasicMaterial({ color: 0x35d05a, transparent: true, opacity: 0.95 });
     RING_COURSE.forEach((p, i) => {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(14, 1.6, 10, 28), i === 0 ? matNext : mat);
+      // Rings 5-8 are smaller (ringRadius), so the back half of the course
+      // asks for real precision.
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(ringRadius(i), 1.6, 10, 28), i === 0 ? matNext : mat);
       ring.position.set(p[0], p[1], p[2]);
       ring.userData.index = i;
       this.scene.add(ring);
@@ -289,6 +352,7 @@ export class World {
       }
       tree.position.set(x, h, z);
       tree.rotation.y = rand() * Math.PI * 2;
+      tree.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       this.scene.add(tree);
     }
     // Lighthouse: striped tower on the main island's north point.
@@ -306,16 +370,95 @@ export class World {
     this.scene.add(light);
   }
 
+  // A short burst of confetti at a flown ring: a dozen small tetrahedra
+  // that scatter and fade in about 0.6 s, so a hit reads at a glance.
+  burst(position) {
+    if (!this.effects) this.effects = [];
+    const rand = mulberry32((Math.random() * 1e9) | 0);
+    const colors = [0xffd23c, 0x35d05a, 0xffffff, 0xffb020];
+    for (let i = 0; i < 12; i++) {
+      const m = new THREE.Mesh(
+        new THREE.TetrahedronGeometry(1.1),
+        new THREE.MeshBasicMaterial({ color: colors[i % colors.length], transparent: true }),
+      );
+      m.position.copy(position);
+      const a = rand() * Math.PI * 2;
+      const b = (rand() - 0.5) * Math.PI;
+      const sp = 14 + rand() * 16;
+      this.effects.push({
+        mesh: m, life: 0.6, age: 0, op0: 1,
+        vel: new THREE.Vector3(Math.cos(a) * Math.cos(b) * sp, Math.abs(Math.sin(b)) * sp * 0.8 + 4, Math.sin(a) * Math.cos(b) * sp),
+        grow: 0, fade: true,
+      });
+      this.scene.add(m);
+    }
+  }
+
+  // A white ring that blooms on the water where a seaplane ditches.
+  splash(position) {
+    if (!this.effects) this.effects = [];
+    const m = new THREE.Mesh(
+      new THREE.RingGeometry(0.8, 1.6, 24),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+    );
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(position.x, 0.4, position.z);
+    this.effects.push({ mesh: m, life: 1.0, age: 0, op0: 0.9, vel: new THREE.Vector3(0, 0, 0), grow: 26, fade: true });
+    this.scene.add(m);
+  }
+
+  // Grey smoke puffs for a crash on land: they rise, swell and fade.
+  smoke(position) {
+    if (!this.effects) this.effects = [];
+    const rand = mulberry32((Math.random() * 1e9) | 0);
+    for (let i = 0; i < 4; i++) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(1.6 + rand() * 1.2, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0x5a5a5a, transparent: true, opacity: 0.75 }),
+      );
+      m.position.set(position.x + (rand() - 0.5) * 4, position.y + 1 + rand() * 2, position.z + (rand() - 0.5) * 4);
+      this.effects.push({
+        mesh: m, life: 1.2, age: 0, op0: 0.75,
+        vel: new THREE.Vector3((rand() - 0.5) * 2, 3 + rand() * 2, (rand() - 0.5) * 2),
+        grow: 5, fade: true,
+      });
+      this.scene.add(m);
+    }
+  }
+
   update(dt) {
     // Clouds drift slowly; rings bob and spin so they read as targets.
     for (const c of this.clouds) {
       c.position.x += dt * 1.5;
       if (c.position.x > 1200) c.position.x = -1200;
     }
+    // The swell layer slides with the wind so the ocean never sits still.
+    if (this.swell) {
+      this.swell.position.x += dt * 2.2;
+      this.swell.position.z += dt * 0.9;
+      if (this.swell.position.x > 400) this.swell.position.x = -400;
+      if (this.swell.position.z > 400) this.swell.position.z = -400;
+    }
     const t = performance.now() / 1000;
     this.rings.forEach((r, i) => {
       r.rotation.y = t * 0.4 + i;
       r.position.y += Math.sin(t * 0.8 + i * 1.7) * dt * 0.6;
     });
+    // Particle effects age out: move, grow, fade, then leave the scene.
+    if (this.effects) {
+      for (let i = this.effects.length - 1; i >= 0; i--) {
+        const e = this.effects[i];
+        e.age += dt;
+        e.mesh.position.addScaledVector(e.vel, dt);
+        if (e.grow) e.mesh.scale.setScalar(1 + (e.age / e.life) * e.grow * 0.4);
+        if (e.fade) e.mesh.material.opacity = Math.max(0, e.op0 * (1 - e.age / e.life));
+        if (e.age >= e.life) {
+          this.scene.remove(e.mesh);
+          e.mesh.geometry.dispose();
+          e.mesh.material.dispose();
+          this.effects.splice(i, 1);
+        }
+      }
+    }
   }
 }

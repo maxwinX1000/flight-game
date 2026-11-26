@@ -28,9 +28,15 @@ export const CONFIG = {
   scoreCheckpoint: 150,
   scoreLanding: 500,
   scoreTimeBonus: 2, // per second under the mission par time
+  scoreDeadCentre: 50, // bonus for threading a ring within deadCentreRadius of its centre
+  deadCentreRadius: 6, // metres from a ring's centre for the dead-centre bonus
+  ringRadiusLate: 10, // rings 5-8 are smaller than the first four (14)
+  tourLowPassMaxAlt: 100, // a tour beacon only counts below this altitude (m)
   // Camera
-  cameraDistance: 16,
-  cameraHeight: 5,
+  cameraDistance: 12,
+  cameraHeight: 4,
+  cameraFovBase: 62, // widens with speed: 62 + throttle * cameraFovSpeed (max 70)
+  cameraFovSpeed: 8,
 };
 
 export const MISSIONS = [
@@ -69,6 +75,12 @@ export const RING_COURSE = [
   [-380, 85, 120],
   [-240, 65, -180],
 ];
+
+// Ring radius: the first four rings are wide (14 m); rings 5-8 shrink to
+// ringRadiusLate, so the back half of the course asks for real precision.
+export function ringRadius(index) {
+  return index >= 4 ? CONFIG.ringRadiusLate : 14;
+}
 
 export const TOUR_BEACONS = [
   [620, 60, -480],
