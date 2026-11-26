@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Coral Coast Run — a flight game</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- Instruments -->
+<div id="hud" aria-hidden="true">
+  <div id="compass"></div>
+  <div class="instruments">
+    <div class="gauge"><label>ALT</label><b id="alt">0 m</b></div>
+    <div class="gauge"><label>SPD</label><b id="spd">0 km/h</b></div>
+    <div class="gauge"><label>HDG</label><b id="hdg">000° N</b></div>
+    <div class="gauge"><label>THR</label><b id="thr-text">0%</b><div class="bar"><i id="thr" style="width:0%"></i></div></div>
+    <div class="gauge"><label>FUEL</label><b id="fuel-text">100%</b><div class="bar fuel"><i id="fuel" style="width:100%"></i></div></div>
+  </div>
+  <div id="mission-box">
+    <div><b id="mission">—</b> <span id="progress"></span></div>
+    <div>Score <b id="score">0</b> · <span id="timer">00:00</span></div>
+  </div>
+  <div id="warn" class="hidden"></div>
+</div>
+
+<!-- Title screen -->
+<div id="screen-title" class="screen">
+  <div class="panel">
+    <h1>CORAL COAST RUN</h1>
+    <p class="tag">A seaplane, five islands, and a runway that wants you back.</p>
+    <p class="controls">
+      <b>W/S</b> pitch · <b>A/D</b> bank &amp; turn · <b>Shift</b> throttle up ·
+      <b>Ctrl</b> throttle down · <b>Mouse drag</b> look around ·
+      <b>R</b> restart · <b>P</b> pause
+    </p>
+    <div class="row">
+      <button id="btn-fly" class="big">Fly</button>
+      <button id="btn-how">How to fly</button>
+    </div>
+    <div id="howto" class="hidden">
+      <p>Throttle up with <b>Shift</b> until she lifts off the runway, then
+      pull gently with <b>W</b>. Bank with <b>A/D</b> to turn — the harder the
+      bank, the tighter the turn, but the more speed she loses. Rings and
+      beacons top up your fuel. Land slow, level, and on the strip: a fast or
+      crooked touchdown is a crash. Three hits and the flight is over.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Mission select -->
+<div id="screen-mission" class="screen hidden">
+  <div class="panel">
+    <h2>Pick a mission</h2>
+    <div id="mission-list"></div>
+    <div class="row"><button id="btn-back">Back</button></div>
+  </div>
+</div>
+
+<!-- Result screen -->
+<div id="screen-result" class="screen hidden">
+  <div class="panel">
+    <h2 id="result-title">Flight complete</h2>
+    <p id="result-text"></p>
+    <p id="result-score"></p>
+    <div class="row">
+      <button id="btn-again" class="big">Fly again</button>
+      <button id="btn-title">Title</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pause screen -->
+<div id="screen-pause" class="screen hidden">
+  <div class="panel">
+    <h2>Paused</h2>
+    <p>Take a breath. The islands will wait.</p>
+    <div class="row">
+      <button id="btn-resume" class="big">Resume</button>
+      <button id="btn-quit">Quit to title</button>
+    </div>
+  </div>
+</div>
+
+<script src="three.min.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
