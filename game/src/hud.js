@@ -10,7 +10,7 @@ const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
 export class HUD {
   constructor() {
     this.el = {};
-    for (const id of ['alt', 'spd', 'hdg', 'thr', 'fuel', 'thr-text', 'fuel-text', 'score', 'combo', 'target', 'mission', 'timer', 'progress', 'warn', 'compass']) {
+    for (const id of ['alt', 'spd', 'hdg', 'thr', 'fuel', 'thr-text', 'fuel-text', 'score', 'combo', 'target', 'mission', 'timer', 'progress', 'warn', 'compass', 'att-horizon']) {
       this.el[id] = document.getElementById(id);
     }
     this.screens = {
@@ -54,6 +54,12 @@ export class HUD {
     this.el.timer.textContent = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
     this.el.progress.textContent = missions.progressText;
     this.el.target.textContent = this.nextTargetText(p, missions);
+    // Artificial horizon: the sky/ground disc rotates with bank and slides
+    // with pitch, so the panel reads as lit instruments, not just numbers.
+    if (this.el['att-horizon']) {
+      const shift = Math.max(-42, Math.min(42, p.pitch * 1.4));
+      this.el['att-horizon'].setAttribute('transform', `rotate(${-p.bank} 50 50) translate(0 ${shift})`);
+    }
     // Compass strip: a moving window of headings around the nose.
     const marks = [];
     for (let d = -60; d <= 60; d += 15) {

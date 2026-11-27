@@ -161,13 +161,16 @@ export class Missions {
   checkLanding() {
     if (!this.mission || this.mission.id !== 'landing') return;
     const p = this.plane;
-    if (!this.tookOff && p.altitude > 25) this.tookOff = true;
+    // Took off once she is high, or once she is properly airborne at
+    // speed — the landing demo starts her in the air on final, and the
+    // HUD should read "fly the circuit, then land" for that, not "take off".
+    const ground = this.world.groundHeight(p.position.x, p.position.z);
+    if (!this.tookOff && (p.altitude > 25 || (p.speed > 30 && p.position.y > ground + 5))) this.tookOff = true;
     if (!this.tookOff || this.landed) return;
     const [cx, cz] = RUNWAY.centre;
     const dx = Math.abs(p.position.x - cx);
     const dz = Math.abs(p.position.z - cz);
     const onStrip = dx < RUNWAY.width / 2 && dz < RUNWAY.length / 2;
-    const ground = this.world.groundHeight(p.position.x, p.position.z);
     if (onStrip && p.position.y <= ground + 1.2) {
       const aligned = Math.min(Math.abs(p.heading), Math.abs(360 - p.heading)) < 18 || Math.abs(p.heading - 180) < 18;
       const gentle = p.verticalSpeed > -6 && p.speed < 55;

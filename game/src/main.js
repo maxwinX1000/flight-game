@@ -95,10 +95,27 @@ const demoMode = new URLSearchParams(location.search).get('demo');
 const demoFly = demoMode === 'rings';
 const demoTour = demoMode === 'tour';
 const demoCover = demoMode === 'cover';
+const demoLanding = demoMode === 'landing';
 if (demoFly) {
   setTimeout(() => startMission('rings'), 800);
 } else if (demoTour) {
   setTimeout(() => startMission('tour'), 800);
+} else if (demoLanding) {
+  // Landing staging: on final from the north, 16 m over the approach, so
+  // one frame holds the plane, the strip, the tower and the windsock.
+  // The autopilot holds 16 m level (a higher start makes it dive and
+  // touch down short of the strip); tookOff is detected from being
+  // airborne at speed, so the HUD reads "fly the circuit, then land".
+  setTimeout(() => {
+    startMission('landing');
+    plane.position.set(0, 16, -320);
+    plane.heading = 180;
+    plane.throttle = 0.45;
+    plane.speed = 45;
+    plane.pitch = 0;
+    plane.bank = 0;
+    plane.sync();
+  }, 800);
 } else if (demoCover) {
   // Cover staging: the Ring Run, with the plane low on the approach to
   // ring 1 and the runway beyond it, so one frame holds plane, ring,
@@ -158,6 +175,13 @@ function autopilot(dt) {
       if (d < bestD) { bestD = d; best = b; }
     });
     if (best) target = new THREE.Vector3(best[0], best[1], best[2]);
+  } else if (missions.state === 'flying' && missions.mission && missions.mission.id === 'landing') {
+    // Landing: hold 16 m and fly the centreline to the strip; once past
+    // the threshold, climb away on a go-around instead of turning low
+    // over the hills at the strip's edge.
+    target = plane.position.z > -40
+      ? new THREE.Vector3(0, 70, 350)
+      : new THREE.Vector3(0, 16, 0);
   }
   if (!target) {
     attractAngle += dt * 0.045;
@@ -184,6 +208,9 @@ function autopilot(dt) {
   // climbing to a target far above.
   const onCourse = missions.state === 'flying' && missions.mission && (missions.mission.id === 'rings' || missions.mission.id === 'tour');
   let thrTarget = onCourse ? 0.75 : 0.55;
+  if (missions.state === 'flying' && missions.mission && missions.mission.id === 'landing') {
+    thrTarget = plane.position.z > -40 ? 0.75 : 0.45;
+  }
   if (onCourse) {
     if (d0 < 250) thrTarget = 0.35;
     if (Math.abs(dh) > 10) thrTarget = Math.min(thrTarget, 0.2);
@@ -211,9 +238,11 @@ function updateCamera(dt) {
     .clone()
     .addScaledVector(behind, CONFIG.cameraDistance)
     .add(new THREE.Vector3(0, CONFIG.cameraHeight, 0));
-  // Mouse drag orbits the camera around the plane a little.
+  // A fixed offset to the plane's right, so the chase view is a three-quarter
+  // rear view — wing, canopy and floats in frame — instead of a dead-behind
+  // look at the tail. Mouse drag orbits around that offset.
   const side = new THREE.Vector3(Math.cos(rad), 0, Math.sin(rad));
-  desired.addScaledVector(side, mouseOrbit.x * 6);
+  desired.addScaledVector(side, 4.5 + mouseOrbit.x * 6);
   desired.y += mouseOrbit.y * 5;
   camera.position.lerp(desired, Math.min(1, dt * 5));
   const look = plane.position.clone().addScaledVector(new THREE.Vector3(Math.sin(rad), 0, -Math.cos(rad)), 22);
@@ -255,7 +284,7 @@ function loop(now) {
       plane.update(dt, null, autopilot(dt));
       if (missions.state === 'flying') missions.update(dt);
     } else if (missions.state === 'flying') {
-      if (demoFly || demoTour || demoCover) plane.update(dt, null, autopilot(dt));
+      if (demoFly || demoTour || demoCover || demoLanding) plane.update(dt, null, autopilot(dt));
       else plane.update(dt, input, null);
       missions.update(dt);
     }

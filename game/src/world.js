@@ -26,14 +26,17 @@ function islandHeight(x, z, cx, cz, radius, peak, rand) {
   const falloff = Math.pow(1 - d * d, 1.6);
   let h = -2 + peak * falloff * (0.45 + 0.55 * hills);
   // Flatten the runway apron on the main island so the strip sits on flat
-  // ground instead of inside a hill: fully flat near the strip, blending
-  // back to the natural hills at the apron's edge.
+  // ground instead of inside a hill: fully flat near the strip (the whole
+  // take-off and landing corridor), blending back to the natural hills
+  // past the apron's edge. The flat core has to cover the strip plus
+  // margin: the take-off path leaves the strip low and slow, and a hill
+  // at the apron's edge is a crash, not scenery.
   if (cx === 0 && cz === 0) {
-    const rx = Math.abs(x) / (RUNWAY.width / 2 + 30);
-    const rz = Math.abs(z) / (RUNWAY.length / 2 + 30);
+    const rx = Math.abs(x) / (RUNWAY.width / 2 + 40);
+    const rz = Math.abs(z) / (RUNWAY.length / 2 + 40);
     const ad = Math.max(rx, rz);
-    if (ad < 1) {
-      const t = Math.max(0, Math.min(1, (ad - 0.55) / 0.45));
+    if (ad < 1.25) {
+      const t = Math.max(0, Math.min(1, (ad - 0.75) / 0.5));
       const smooth = t * t * (3 - 2 * t);
       h = 2.5 + (h - 2.5) * smooth;
     }
@@ -79,7 +82,9 @@ export class World {
     const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
     this.scene.add(sky);
     this.scene.background = null;
-    this.scene.fog = new THREE.Fog(0x9fc8e8, 500, 2200);
+    // Fog the colour of the horizon haze, so the sea melts into the sky
+    // instead of ending on a hard line.
+    this.scene.fog = new THREE.Fog(0xcfe6f5, 400, 2400);
     const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x3d7a4a, 0.9);
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff2d0, 1.4);
@@ -97,7 +102,8 @@ export class World {
     sun.shadow.bias = -0.0006;
     this.scene.add(sun);
     this.sun = sun;
-    // Sun disc and a few soft clouds.
+    // Sun disc with a soft halo, so it reads as a light source, not a
+    // flat yellow circle pasted on the sky.
     const sunMesh = new THREE.Mesh(
       new THREE.CircleGeometry(60, 24),
       new THREE.MeshBasicMaterial({ color: 0xfff6c9, fog: false }),
@@ -105,20 +111,27 @@ export class World {
     sunMesh.position.set(500, 420, -900);
     sunMesh.lookAt(0, 0, 0);
     this.scene.add(sunMesh);
+    const halo = new THREE.Mesh(
+      new THREE.CircleGeometry(130, 24),
+      new THREE.MeshBasicMaterial({ color: 0xfff6c9, transparent: true, opacity: 0.28, fog: false }),
+    );
+    halo.position.set(500, 420, -905);
+    halo.lookAt(0, 0, 0);
+    this.scene.add(halo);
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.88 });
     const rand = mulberry32(7);
     this.clouds = [];
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < 36; i++) {
       const group = new THREE.Group();
-      const puffs = 3 + Math.floor(rand() * 3);
+      const puffs = 4 + Math.floor(rand() * 3);
       for (let p = 0; p < puffs; p++) {
-        const s = 18 + rand() * 26;
+        const s = 22 + rand() * 32;
         const puff = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), cloudMat);
-        puff.position.set((rand() - 0.5) * 70, (rand() - 0.5) * 8, (rand() - 0.5) * 30);
+        puff.position.set((rand() - 0.5) * 90, (rand() - 0.5) * 10, (rand() - 0.5) * 40);
         puff.scale.y = 0.45;
         group.add(puff);
       }
-      group.position.set((rand() - 0.5) * 2200, 150 + rand() * 120, (rand() - 0.5) * 2200);
+      group.position.set((rand() - 0.5) * 2200, 140 + rand() * 130, (rand() - 0.5) * 2200);
       this.scene.add(group);
       this.clouds.push(group);
     }
@@ -128,7 +141,7 @@ export class World {
     // Segmented sea with a per-vertex blue jitter, so the water reads as
     // moving surface instead of one flat sheet of paint.
     const seg = 32;
-    const geo = new THREE.PlaneGeometry(5200, 5200, seg, seg);
+    const geo = new THREE.PlaneGeometry(5600, 5600, seg, seg);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
@@ -152,32 +165,24 @@ export class World {
     // A second, slow-drifting swell layer: a translucent sheet a touch
     // above the sea that slides with the wind, so the ocean never sits still.
     const swell = new THREE.Mesh(
-      new THREE.PlaneGeometry(5200, 5200, 8, 8),
-      new THREE.MeshLambertMaterial({ color: 0x7fc4e0, transparent: true, opacity: 0.16 }),
+      new THREE.PlaneGeometry(5600, 5600, 8, 8),
+      new THREE.MeshLambertMaterial({ color: 0x7fc4e0, transparent: true, opacity: 0.1 }),
     );
     swell.rotation.x = -Math.PI / 2;
     swell.position.y = 0.5;
     this.scene.add(swell);
     this.swell = swell;
-    // A lighter shallow ring around the main island reads as a lagoon.
-    const lagoon = new THREE.Mesh(
-      new THREE.CircleGeometry(330, 40),
-      new THREE.MeshLambertMaterial({ color: 0x4fb3a9, transparent: true, opacity: 0.55 }),
-    );
-    lagoon.rotation.x = -Math.PI / 2;
-    lagoon.position.y = 0.4;
-    this.scene.add(lagoon);
   }
 
   buildIslands() {
     // Main island (with the runway) plus four smaller ones, each a
     // heightmap disc coloured sand -> grass -> rock by height.
     const islands = [
-      { cx: 0, cz: 0, radius: 300, peak: 46, seed: 11 },
-      { cx: 620, cz: -420, radius: 190, peak: 62, seed: 23 },
-      { cx: -540, cz: 380, radius: 170, peak: 54, seed: 37 },
-      { cx: 480, cz: 480, radius: 130, peak: 38, seed: 51 },
-      { cx: -480, cz: -460, radius: 150, peak: 44, seed: 67 },
+      { cx: 0, cz: 0, radius: 300, peak: 58, seed: 11 },
+      { cx: 620, cz: -420, radius: 190, peak: 66, seed: 23 },
+      { cx: -540, cz: 380, radius: 170, peak: 64, seed: 37 },
+      { cx: 480, cz: 480, radius: 130, peak: 48, seed: 51 },
+      { cx: -480, cz: -460, radius: 150, peak: 54, seed: 67 },
     ];
     this.islands = islands;
     const sand = new THREE.Color(0xe8d29a);
@@ -208,6 +213,17 @@ export class World {
       mesh.receiveShadow = true;
       this.scene.add(mesh);
     }
+    // Shallow turquoise water around every island, so the sea reads as a
+    // coral archipelago instead of one flat blue sheet.
+    for (const isl of islands) {
+      const lagoon = new THREE.Mesh(
+        new THREE.CircleGeometry(isl.radius * 1.18, 40),
+        new THREE.MeshLambertMaterial({ color: 0x4fb3a9, transparent: true, opacity: 0.5 }),
+      );
+      lagoon.rotation.x = -Math.PI / 2;
+      lagoon.position.set(isl.cx, 0.4, isl.cz);
+      this.scene.add(lagoon);
+    }
   }
 
   // Height of the ground at (x, z): the highest island there, else sea.
@@ -229,25 +245,28 @@ export class World {
   }
 
   buildRunway() {
+    // Runway: on the main island, pointing north-south. The strip sits
+    // 0.25 m proud of the flattened apron (top 2.75 vs ground 2.5) so its
+    // dark asphalt never z-fights with the grass beneath it.
     const [cx, cz] = RUNWAY.centre;
     const strip = new THREE.Mesh(
       new THREE.BoxGeometry(RUNWAY.width, 1.2, RUNWAY.length),
       new THREE.MeshLambertMaterial({ color: 0x3a3f46 }),
     );
-    strip.position.set(cx, this.runwayTop - 0.6, cz);
+    strip.position.set(cx, this.runwayTop + 0.15 - 0.6, cz);
     this.scene.add(strip);
     // Centre dashes and threshold bars, pale paint on the dark strip.
     const paint = new THREE.MeshBasicMaterial({ color: 0xf5f2e8 });
     for (let i = -4; i <= 4; i++) {
       if (i === 0) continue;
       const dash = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.2, 12), paint);
-      dash.position.set(cx, this.runwayTop + 0.1, cz + i * 26);
+      dash.position.set(cx, this.runwayTop + 0.35, cz + i * 26);
       this.scene.add(dash);
     }
     for (const s of [-1, 1]) {
       for (let k = -2; k <= 2; k++) {
         const bar = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 8), paint);
-        bar.position.set(cx + k * 4.4, this.runwayTop + 0.1, cz + s * (RUNWAY.length / 2 - 10));
+        bar.position.set(cx + k * 4.4, this.runwayTop + 0.35, cz + s * (RUNWAY.length / 2 - 10));
         this.scene.add(bar);
       }
     }
@@ -290,14 +309,26 @@ export class World {
   }
 
   buildRings() {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.9 });
-    const matNext = new THREE.MeshBasicMaterial({ color: 0x35d05a, transparent: true, opacity: 0.95 });
+    // Lit rings with a white inner stripe, so they read as 3D gates with
+    // depth instead of flat orange donuts. Each ring faces the leg that
+    // flies into it (its normal points back along the course), so the
+    // pilot always sees a gate ahead, never a spinning edge.
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffb020, emissive: 0x7a4a00 });
+    const matNext = new THREE.MeshLambertMaterial({ color: 0x35d05a, emissive: 0x1d7a33 });
+    const stripeMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x555555 });
+    const legStart = (i) => (i === 0 ? [0, 4, 110] : RING_COURSE[i - 1]);
     RING_COURSE.forEach((p, i) => {
       // Rings 5-8 are smaller (ringRadius), so the back half of the course
       // asks for real precision.
       const ring = new THREE.Mesh(new THREE.TorusGeometry(ringRadius(i), 1.6, 10, 28), i === 0 ? matNext : mat);
       ring.position.set(p[0], p[1], p[2]);
+      const prev = legStart(i);
+      const legHeading = Math.atan2(p[0] - prev[0], -(p[2] - prev[2]));
+      ring.rotation.y = Math.PI - legHeading;
+      const stripe = new THREE.Mesh(new THREE.TorusGeometry(ringRadius(i) - 2.4, 0.45, 8, 28), stripeMat);
+      ring.add(stripe);
       ring.userData.index = i;
+      ring.userData.next = i === 0;
       this.scene.add(ring);
       this.rings.push(ring);
     });
@@ -308,7 +339,7 @@ export class World {
   setNextRing(index) {
     this.rings.forEach((r, i) => {
       r.material = i === index ? this.ringMatNext : this.ringMat;
-      r.scale.setScalar(i === index ? 1.15 : 1);
+      r.userData.next = i === index;
     });
   }
 
@@ -331,7 +362,7 @@ export class World {
     const rand = mulberry32(99);
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8a6b48 });
     const leafMat = new THREE.MeshLambertMaterial({ color: 0x2f8f4e });
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 110; i++) {
       const isl = this.islands[Math.floor(rand() * this.islands.length)];
       const a = rand() * Math.PI * 2;
       const r = isl.radius * (0.55 + rand() * 0.35);
@@ -354,6 +385,42 @@ export class World {
       tree.rotation.y = rand() * Math.PI * 2;
       tree.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       this.scene.add(tree);
+    }
+    // A few white boats anchored in the lagoons, and grey rocks on the
+    // beaches, so the waterline has something in it besides sand.
+    const hullMat = new THREE.MeshLambertMaterial({ color: 0xf2f2ee });
+    const mastMat = new THREE.MeshLambertMaterial({ color: 0x8a6b48 });
+    const rockMat = new THREE.MeshLambertMaterial({ color: 0x7d7468 });
+    for (let i = 0; i < 8; i++) {
+      const isl = this.islands[Math.floor(rand() * this.islands.length)];
+      const a = rand() * Math.PI * 2;
+      const r = isl.radius * 1.25;
+      const bx = isl.cx + Math.cos(a) * r;
+      const bz = isl.cz + Math.sin(a) * r;
+      const boat = new THREE.Group();
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(7, 1.6, 2.6), hullMat);
+      hull.position.y = 0.8;
+      boat.add(hull);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 6, 6), mastMat);
+      mast.position.y = 4.4;
+      boat.add(mast);
+      boat.position.set(bx, 0, bz);
+      boat.rotation.y = rand() * Math.PI * 2;
+      this.scene.add(boat);
+    }
+    for (let i = 0; i < 24; i++) {
+      const isl = this.islands[Math.floor(rand() * this.islands.length)];
+      const a = rand() * Math.PI * 2;
+      const r = isl.radius * (0.92 + rand() * 0.12);
+      const x = isl.cx + Math.cos(a) * r;
+      const z = isl.cz + Math.sin(a) * r;
+      const h = this.groundHeight(x, z);
+      if (h < 0.5) continue;
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1.5 + rand() * 2.2, 0), rockMat);
+      rock.position.set(x, h + 0.5, z);
+      rock.rotation.set(rand() * 3, rand() * 3, rand() * 3);
+      rock.castShadow = true;
+      this.scene.add(rock);
     }
     // Lighthouse: striped tower on the main island's north point.
     const light = new THREE.Group();
@@ -432,17 +499,20 @@ export class World {
       c.position.x += dt * 1.5;
       if (c.position.x > 1200) c.position.x = -1200;
     }
-    // The swell layer slides with the wind so the ocean never sits still.
+    // The swell layer slides slowly with the wind so the ocean never sits still.
     if (this.swell) {
-      this.swell.position.x += dt * 2.2;
-      this.swell.position.z += dt * 0.9;
+      this.swell.position.x += dt * 1.2;
+      this.swell.position.z += dt * 0.5;
       if (this.swell.position.x > 400) this.swell.position.x = -400;
       if (this.swell.position.z > 400) this.swell.position.z = -400;
     }
     const t = performance.now() / 1000;
     this.rings.forEach((r, i) => {
-      r.rotation.y = t * 0.4 + i;
-      r.position.y += Math.sin(t * 0.8 + i * 1.7) * dt * 0.6;
+      // Gentle pulse on the next ring, a slow breathe on the rest — the
+      // gates stay readable and never turn edge-on to the pilot.
+      const base = r.userData.next ? 1.15 : 1;
+      r.scale.setScalar(base * (1 + 0.03 * Math.sin(t * 2 + i * 1.7)));
+      r.position.y += Math.sin(t * 0.8 + i * 1.7) * dt * 0.4;
     });
     // Particle effects age out: move, grow, fade, then leave the scene.
     if (this.effects) {
