@@ -47,10 +47,10 @@ function onEvent(type, data) {
   } else if (type === 'damage') {
     hud.warn(`HIT — ${data.what}. Damage ${data.damage}/${data.max}`);
   } else if (type === 'done') {
-    hud.result('Flight complete', data.message, data.score, data.time);
+    hud.result('Flight complete', data.message, data.score, data.time, { mission: data.mission, newBest: data.newBest });
     attract = true;
   } else if (type === 'crashed') {
-    hud.result('Crashed', data.message, data.score, data.time);
+    hud.result('Crashed', data.message, data.score, data.time, { mission: data.mission });
     attract = true;
   }
 }
@@ -184,12 +184,27 @@ function autopilot(dt) {
       : new THREE.Vector3(0, 16, 0);
   }
   if (!target) {
-    attractAngle += dt * 0.045;
-    target = new THREE.Vector3(
-      Math.cos(attractAngle) * 320,
-      78 + Math.sin(attractAngle * 2) * 14,
-      Math.sin(attractAngle) * 320,
-    );
+    // No mission target (attract mode / Free Flight): climb out first.
+    // The runway's take-off path leaves low over rising ground to the
+    // north-east, so a low turn straight into the circuit clips the
+    // hill. Hold the runway heading and climb to 90 m before joining
+    // the circuit — a proper climb-out, and the circuit itself stays
+    // above the islands' peaks once she is up there.
+    if (plane.altitude < 60) {
+      const rad = (plane.heading * Math.PI) / 180;
+      target = new THREE.Vector3(
+        plane.position.x + Math.sin(rad) * 200,
+        90,
+        plane.position.z - Math.cos(rad) * 200,
+      );
+    } else {
+      attractAngle += dt * 0.045;
+      target = new THREE.Vector3(
+        Math.cos(attractAngle) * 320,
+        78 + Math.sin(attractAngle * 2) * 14,
+        Math.sin(attractAngle) * 320,
+      );
+    }
   }
   const aim = aimPoint || target;
   const to = aim.clone().sub(plane.position);
@@ -289,6 +304,19 @@ function loop(now) {
       missions.update(dt);
     }
     world.update(dt);
+    // Beacons face the plane so their rings always read as gates, and
+    // the nearest unvisited beacon pulses as the next target.
+    world.faceBeacons(plane.position.x, plane.position.z);
+    if (missions.state === 'flying' && missions.mission && missions.mission.id === 'tour') {
+      let best = -1;
+      let bestD = Infinity;
+      TOUR_BEACONS.forEach((b, i) => {
+        if (missions.beaconsHit.has(i)) return;
+        const d = plane.position.distanceTo(new THREE.Vector3(b[0], b[1], b[2]));
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      world.setNextBeacon(best);
+    }
     updateCamera(dt);
     audio.setEngine(plane.throttle, plane.speed);
   }

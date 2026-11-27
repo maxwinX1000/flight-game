@@ -116,11 +116,25 @@ export class HUD {
     this.warn(text);
   }
 
-  result(title, text, score, time) {
+  result(title, text, score, time, extra = {}) {
     this.resultTitle.textContent = title;
     this.resultText.textContent = text;
     const t = Math.floor(time);
     this.resultScore.textContent = `Score ${score}  ·  Time ${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+    // Mission name + best score: the result screen proves the landing
+    // paid off and shows the score to beat next time.
+    const bestEl = document.getElementById('result-best');
+    if (bestEl) {
+      let best = null;
+      try {
+        best = extra.mission && typeof localStorage !== 'undefined'
+          ? localStorage.getItem(`coral-best-${extra.mission.id}`)
+          : null;
+      } catch (e) { /* storage unavailable */ }
+      if (extra.mission && extra.newBest) bestEl.textContent = `New best for ${extra.mission.name}!`;
+      else if (extra.mission && best) bestEl.textContent = `Best for ${extra.mission.name}: ${best}`;
+      else bestEl.textContent = '';
+    }
     this.show('result');
   }
 
@@ -130,7 +144,12 @@ export class HUD {
     MISSIONS.forEach((m, i) => {
       const btn = document.createElement('button');
       btn.className = 'mission-card';
-      btn.innerHTML = `<b>${i + 1}. ${m.name}</b><span>${m.blurb}</span><em>Par ${Math.floor(m.parTime / 60)}:${String(m.parTime % 60).padStart(2, '0')}</em>`;
+      let best = null;
+      try {
+        best = typeof localStorage !== 'undefined' ? localStorage.getItem(`coral-best-${m.id}`) : null;
+      } catch (e) { /* storage unavailable */ }
+      const par = m.parTime > 0 ? `Par ${Math.floor(m.parTime / 60)}:${String(m.parTime % 60).padStart(2, '0')}` : 'No timer';
+      btn.innerHTML = `<b>${i + 1}. ${m.name}</b><span>${m.blurb}</span><em>${par}${best ? ` · Best ${best}` : ''}</em>`;
       btn.addEventListener('click', () => onPick(m.id));
       list.appendChild(btn);
     });

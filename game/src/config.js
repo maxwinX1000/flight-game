@@ -61,6 +61,12 @@ export const MISSIONS = [
     parTime: 180,
     checkpoints: 0,
   },
+  {
+    id: 'free',
+    name: 'Free Flight',
+    blurb: 'No course, no clock — just you, the islands, and the sea.',
+    parTime: 0,
+  },
 ];
 
 // Ring positions: [x, y, z] in world metres. The course threads the islands

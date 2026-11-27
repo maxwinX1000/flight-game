@@ -72,16 +72,19 @@ export class Missions {
     this.time += dt;
     const p = this.plane;
     if (p.altitude > 15) this.airborne = true;
-    // Fuel: full throttle burns fastest; gliding sips.
-    this.fuel -= CONFIG.fuelBurn * (0.25 + p.throttle * 0.75) * dt;
-    if (this.fuel <= 20 && !this.warnedFuel) {
-      this.warnedFuel = true;
-      this.audio.warning();
-      this.onEvent('warning', { text: 'LOW FUEL' });
-    }
-    if (this.fuel <= 0) {
-      this.fuel = 0;
-      p.throttle = 0; // dead stick: glide her in or swim.
+    // Fuel: full throttle burns fastest; gliding sips. Free Flight has
+    // no clock and no fuel burn — the point is the flying itself.
+    if (this.mission.id !== 'free') {
+      this.fuel -= CONFIG.fuelBurn * (0.25 + p.throttle * 0.75) * dt;
+      if (this.fuel <= 20 && !this.warnedFuel) {
+        this.warnedFuel = true;
+        this.audio.warning();
+        this.onEvent('warning', { text: 'LOW FUEL' });
+      }
+      if (this.fuel <= 0) {
+        this.fuel = 0;
+        p.throttle = 0; // dead stick: glide her in or swim.
+      }
     }
     // Stall warning when the wing is about to quit.
     if (p.speed < CONFIG.minSpeed + 6 && p.altitude > 8 && !this.warnedStall) {
@@ -223,8 +226,10 @@ export class Missions {
         p.speed = 0;
         // Only call the flight over if she actually flew: a plane sitting
         // on the runway at the start has speed 0 too, and that is not a
-        // landing — it is a pilot who has not throttled up yet.
-        if (this.state === 'flying' && this.airborne && this.mission && this.mission.id !== 'landing') {
+        // landing — it is a pilot who has not throttled up yet. Free
+        // Flight never ends on a gentle touchdown either: there is no
+        // course to finish, so she just sits on the water or the grass.
+        if (this.state === 'flying' && this.airborne && this.mission && this.mission.id !== 'landing' && this.mission.id !== 'free') {
           this.finish('She is down in one piece. Flight over.');
         }
       }
@@ -281,7 +286,22 @@ export class Missions {
   finish(message) {
     this.state = 'done';
     this.audio.land();
-    this.onEvent('done', { message, score: this.score, time: this.time, mission: this.mission });
+    // Best score per mission, kept in localStorage under a coral-* key.
+    // Guarded: the headless test harness has no localStorage, and a
+    // private-mode browser can throw on access — either way the game
+    // just plays on without persisting.
+    let newBest = false;
+    if (this.mission) {
+      try {
+        const key = `coral-best-${this.mission.id}`;
+        const prev = typeof localStorage !== 'undefined' ? Number(localStorage.getItem(key) || 0) : 0;
+        if (this.score > prev) {
+          newBest = true;
+          if (typeof localStorage !== 'undefined') localStorage.setItem(key, String(this.score));
+        }
+      } catch (e) { /* storage unavailable: best scores just don't persist */ }
+    }
+    this.onEvent('done', { message, score: this.score, time: this.time, mission: this.mission, newBest });
   }
 
   crash(message) {
@@ -293,7 +313,8 @@ export class Missions {
     if (!this.mission) return '';
     if (this.mission.id === 'rings') return `Rings ${this.ringIndex}/${RING_COURSE.length}`;
     if (this.mission.id === 'tour') return `Beacons ${this.beaconsHit.size}/${TOUR_BEACONS.length}`;
-    if (this.mission.id === 'landing') return this.tookOff ? (this.landed ? 'Landed' : 'Fly the circuit, then land') : 'Take off — full throttle';
+    if (this.mission.id === 'landing') return this.tookOff ? (this.landed ? 'Landed' : 'Fly the circuit') : 'Take off — full throttle';
+    if (this.mission.id === 'free') return 'No course, no clock';
     return '';
   }
 }
