@@ -24,6 +24,24 @@
     <div>Score <b id="score">0</b><span id="combo"></span> · <span id="timer">00:00</span></div>
     <div id="target"></div>
   </div>
+  <div id="attitude" class="gauge" aria-hidden="true">
+    <svg viewBox="0 0 100 100" width="96" height="96">
+      <defs><clipPath id="att-clip"><circle cx="50" cy="50" r="42" /></clipPath></defs>
+      <circle cx="50" cy="50" r="47" fill="#0a1622" stroke="rgba(255,255,255,0.35)" stroke-width="2" />
+      <g clip-path="url(#att-clip)">
+        <g id="att-horizon">
+          <rect x="0" y="0" width="100" height="50" fill="#3f8fd2" />
+          <rect x="0" y="50" width="100" height="50" fill="#8a5a2e" />
+          <line x1="0" y1="50" x2="100" y2="50" stroke="#ffffff" stroke-width="2" />
+          <line x1="20" y1="32" x2="80" y2="32" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" />
+          <line x1="20" y1="68" x2="80" y2="68" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" />
+        </g>
+      </g>
+      <path d="M26 50 L44 50 L50 57 L56 50 L74 50" stroke="#ffd23c" stroke-width="3" fill="none" />
+      <circle cx="50" cy="50" r="3" fill="#ffd23c" />
+    </svg>
+    <label>ATT</label>
+  </div>
   <div id="warn" class="hidden"></div>
 </div>
 

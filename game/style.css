@@ -31,6 +31,10 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #87bfe8;
 #mission-box b { color: #ffe9b0; }
 #mission-box #combo { color: #ffb020; font-weight: 700; }
 #mission-box #target { color: #8fe6a8; font-weight: 600; }
+#attitude { position: absolute; right: 14px; bottom: 14px; text-align: center;
+  padding: 8px 8px 6px; min-width: 0; }
+#attitude svg { display: block; }
+#attitude label { margin-top: 2px; }
 #warn { position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
   background: rgba(160, 20, 10, 0.85); border: 1px solid #ff8a7a; border-radius: 8px;
   padding: 10px 22px; font-size: 20px; font-weight: 700; letter-spacing: 1px; }
